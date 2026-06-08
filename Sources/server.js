@@ -127,7 +127,7 @@ app.get("/", requireLogin, (req, res) => {
 });
 
 app.get("/login", (req, res) => {
-  res.sendFile( path.join(__dirname, 'Sources', 'login.html') );;
+  res.sendFile( path.join(__dirname, 'login.html') );;
 });
 
 app.get(
