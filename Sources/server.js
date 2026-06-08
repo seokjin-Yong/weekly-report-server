@@ -11,6 +11,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const REPORT_DIR = process.env.REPORT_DIR || path.join(__dirname, "reports");
+const UPLOAD_API_KEY = process.env.UPLOAD_API_KEY;
+
 const allowedEmails = (process.env.ALLOWED_EMAILS || "")
   .split(",")
   .map((email) => email.trim().toLowerCase())
@@ -21,6 +23,10 @@ if (!fs.existsSync(REPORT_DIR)) {
 }
 
 app.set("trust proxy", 1);
+
+// JSON Body를 req.body로 파싱하기 위한 미들웨어
+// 반드시 app.post("/api/upload", ...)보다 위에 있어야 합니다.
+app.use(express.json({ limit: "20mb" }));
 
 app.use(
   session({
@@ -76,12 +82,48 @@ function requireLogin(req, res, next) {
   return res.redirect("/login");
 }
 
-app.get("/", (req, res) => {
-  if (req.isAuthenticated()) {
-    return res.redirect("/reports/latest.html");
+function requireUploadApiKey(req, res, next) {
+  const apiKey = req.headers["x-api-key"];
+
+  if (!UPLOAD_API_KEY) {
+    return res.status(500).json({
+      success: false,
+      error: "UPLOAD_API_KEY is not configured.",
+    });
   }
 
-  return res.redirect("/login");
+  if (apiKey !== UPLOAD_API_KEY) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid API key.",
+    });
+  }
+
+  return next();
+}
+
+function isSafeHtmlFilename(filename) {
+  return /^[a-zA-Z0-9._-]+\.html$/.test(filename);
+}
+
+function getLatestReportFile() {
+  const files = fs
+    .readdirSync(REPORT_DIR)
+    .filter((file) => file.endsWith(".html"))
+    .sort()
+    .reverse();
+
+  return files[0] || null;
+}
+
+app.get("/", requireLogin, (req, res) => {
+  const latestFile = getLatestReportFile();
+
+  if (!latestFile) {
+    return res.send("No reports found.");
+  }
+
+  return res.redirect(`/reports/${latestFile}`);
 });
 
 app.get("/login", (req, res) => {
@@ -108,7 +150,7 @@ app.get(
     failureRedirect: "/forbidden",
   }),
   (req, res) => {
-    res.redirect("/reports/latest.html");
+    res.redirect("/");
   }
 );
 
@@ -122,11 +164,51 @@ app.get("/logout", (req, res) => {
   });
 });
 
-app.use(
-  "/reports",
-  requireLogin,
-  express.static(REPORT_DIR)
-);
+app.post("/api/upload", requireUploadApiKey, (req, res) => {
+  const { filename, html } = req.body;
+
+  if (!filename || !html) {
+    return res.status(400).json({
+      success: false,
+      error: "filename and html are required.",
+    });
+  }
+
+  if (!isSafeHtmlFilename(filename)) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid filename. Only .html files are allowed.",
+    });
+  }
+
+  const filePath = path.join(REPORT_DIR, filename);
+
+  fs.writeFileSync(filePath, html, "utf8");
+
+  return res.json({
+    success: true,
+    filename,
+    url: `/reports/${filename}`,
+  });
+});
+
+app.get("/api/reports", requireLogin, (req, res) => {
+  const files = fs
+    .readdirSync(REPORT_DIR)
+    .filter((file) => file.endsWith(".html"))
+    .sort()
+    .reverse();
+
+  res.json({
+    success: true,
+    reports: files.map((file) => ({
+      filename: file,
+      url: `/reports/${file}`,
+    })),
+  });
+});
+
+app.use("/reports", requireLogin, express.static(REPORT_DIR));
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
