@@ -127,14 +127,7 @@ app.get("/", requireLogin, (req, res) => {
 });
 
 app.get("/login", (req, res) => {
-  res.send(`
-    <html>
-      <body>
-        <h2>Weekly Report Login</h2>
-        <a href="/auth/google">Login with Google</a>
-      </body>
-    </html>
-  `);
+  res.sendFile( path.join(__dirname, 'Sources', 'login.html') );;
 });
 
 app.get(
